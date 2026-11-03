@@ -1,0 +1,152 @@
+name: fraud-mlops
+
+# Memory limits keep the whole stack under ~10 GB on a 16 GB laptop.
+# `docker compose up -d` starts the platform; pipelines run on demand via
+# `docker compose run --rm jobs python -m <module>`.
+
+x-mlflow-env: &mlflow-env
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  MODEL_NAME: fraud-detector
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow"]
+      interval: 5s
+      retries: 20
+    mem_limit: 512m
+
+  # Feast online store: latest dest-account features, keyed by nameDest.
+  redis:
+    image: redis:7.2-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "6379:6379"
+    mem_limit: 512m
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
+      --artifacts-destination /mlartifacts
+      --serve-artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlartifacts:/mlartifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      retries: 30
+    mem_limit: 1g
+
+  # Two copies of the same model server, each pinned to a registry alias.
+  champion:
+    build: &service-build
+      context: .
+      dockerfile: docker/service.Dockerfile
+    command: uvicorn serving.model_server:app --host 0.0.0.0 --port 8080
+    environment:
+      <<: *mlflow-env
+      MODEL_ALIAS: champion
+    volumes:
+      - .:/app:ro
+    ports:
+      - "8081:8080"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    mem_limit: 768m
+
+  challenger:
+    build: *service-build
+    command: uvicorn serving.model_server:app --host 0.0.0.0 --port 8080
+    environment:
+      <<: *mlflow-env
+      MODEL_ALIAS: challenger
+    volumes:
+      - .:/app:ro
+    ports:
+      - "8082:8080"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    mem_limit: 768m
+
+  gateway:
+    build: *service-build
+    command: uvicorn gateway.app:app --host 0.0.0.0 --port 8000
+    environment:
+      CHAMPION_URL: http://champion:8080
+      CHALLENGER_URL: http://challenger:8080
+      PREDICTION_LOG: /logs/predictions.jsonl
+      FEAST_REPO: /app/feature_repo
+      FEAST_USAGE: "False"
+    volumes:
+      - .:/app:ro
+      - ./data/logs:/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      - champion
+      - challenger
+      - redis
+    mem_limit: 1g
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    mem_limit: 512m
+
+  # Spark + training + rollout tooling. Not started by `up`; use `run`.
+  jobs:
+    build:
+      context: .
+      dockerfile: docker/jobs.Dockerfile
+    profiles: ["jobs"]
+    environment:
+      <<: *mlflow-env
+      SPARK_DRIVER_MEMORY: 4g
+      GATEWAY_URL: http://gateway:8000
+      CHAMPION_URL: http://champion:8080
+      CHALLENGER_URL: http://challenger:8080
+      FEAST_USAGE: "False"
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ivy-cache:/root/.ivy2
+    mem_limit: 6g
+
+volumes:
+  pgdata:
+  mlartifacts:
+  ivy-cache:

@@ -1,0 +1,12 @@
+project: fraud
+provider: local
+# Relative paths resolve against this folder, so the same file works in every container.
+registry:
+  path: ../data/feast/registry.db
+  cache_ttl_seconds: 60
+online_store:
+  type: redis
+  connection_string: redis:6379
+offline_store:
+  type: file
+entity_key_serialization_version: 2

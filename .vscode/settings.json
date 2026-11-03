@@ -1,0 +1,11 @@
+{
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.analysis.extraPaths": ["."],
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "spark-warehouse": true,
+    "metastore_db": true
+  }
+}

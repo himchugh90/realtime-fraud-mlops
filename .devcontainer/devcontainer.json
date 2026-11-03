@@ -1,0 +1,25 @@
+{
+  // VS Code opens inside the `jobs` container: same Python, Spark, Java and Feast as the pipelines.
+  // The rest of the stack (mlflow, redis, gateway, ...) starts alongside it.
+  "name": "fraud-mlops",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "jobs",
+  "runServices": ["postgres", "redis", "mlflow", "champion", "challenger", "gateway", "prometheus", "grafana", "jobs"],
+  "workspaceFolder": "/workspace",
+  "overrideCommand": true,
+  "shutdownAction": "stopCompose",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  }
+}

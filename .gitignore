@@ -1,0 +1,12 @@
+__pycache__/
+.venv/
+venv/
+*.pyc
+.pytest_cache/
+data/raw/**/*.csv
+data/delta/
+data/feast/
+data/logs/*.jsonl
+spark-warehouse/
+metastore_db/
+derby.log
